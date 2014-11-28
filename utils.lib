@@ -191,25 +191,25 @@ say_color() {
     local fmt="%s"
     case "$1" in
         red)
-            fmt='\e[0;31m%s\e[0m';; # red
+            fmt='\e[0;31m%b\e[0m';; # red
         blue)
-            fmt='\e[0;34m%s\e[0m';; # blue
+            fmt='\e[0;34m%b\e[0m';; # blue
         yellow)
-            fmt='\e[0;33m%s\e[0m';; # yellow
+            fmt='\e[0;33m%b\e[0m';; # yellow
         green)
-            fmt='\e[0;32m%s\e[0m';; # green
+            fmt='\e[0;32m%b\e[0m';; # green
         cyan)
-            fmt='\e[0;36m%s\e[0m';; # cyan
+            fmt='\e[0;36m%b\e[0m';; # cyan
         error|bred)
-            fmt='\e[1;31m%s\e[0m';; # bold red
+            fmt='\e[1;31m%b\e[0m';; # bold red
         skip|bblue)
-            fmt='\e[1;34m%s\e[0m';; # bold blue
+            fmt='\e[1;34m%b\e[0m';; # bold blue
         warn|byellow)
-            fmt='\e[1;33m%s\e[0m';; # bold yellow
+            fmt='\e[1;33m%b\e[0m';; # bold yellow
         pass|bgreen)
-            fmt='\e[1;32m%s\e[0m';; # bold green
+            fmt='\e[1;32m%b\e[0m';; # bold green
         info|bcyan)
-            fmt='\e[1;36m%s\e[0m';; # bold cyan
+            fmt='\e[1;36m%b\e[0m';; # bold cyan
     esac
     shift
     printf "$fmt" "$*"
