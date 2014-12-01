@@ -628,11 +628,6 @@ while [[ $# -gt 0 ]]; do
 done
 set +e
 
-if [[ ${#ARGS} -eq 0 ]]; then
-    printf "Missing parameter(s) !\n";
-    usage
-fi
-
 ACTION="${ARGS[@]:0:1}";ARGS=( "${ARGS[@]:1}" )
 
 ROOT_DIR=$(git rev-parse --show-toplevel 2>/dev/null)
@@ -658,9 +653,10 @@ case "$ACTION" in
     push) store_push;;
     cleanup) store_cleanup;;
     *) if [[ -z "$ACTION" ]]; then
-           printf "You must specified an action !\n" >&2
+           printf "You must specified an action !" >&2
        else
-           printf "Invalid action '$ACTION' !\n" >&2
+           printf "Invalid action '$ACTION' !" >&2
        fi
+       printf "\n\n" >&2
        usage;;
 esac
