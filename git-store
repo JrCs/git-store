@@ -109,6 +109,7 @@ _update_store_file() {
 }
 
 _update_gitignore_file() {
+    return 0
     local tmp=$(mktemp)
     local header="# begin section managed by $self (do not edit this section by hand)"
     local footer="# end section managed by $self"
@@ -158,9 +159,23 @@ store_add() {
             echo "error: can't add '$file' it's a directory" >&2
             continue
         fi
-        # Store the file
+
         local full=$(_get_abspath_from_pwd "$file")
+
+        if [[ -L "$full" ]]; then
+            # Short circuit if file is already in store
+            [[ $(readlink -f "$full") == "$STORE_OBJECTS_DIR"/* ]] && return 0
+            echo "error: can't add '$file' it's a link" >&2
+            continue
+        fi
+        # Store the file
         local hash=$(git hash-object -t blob -w "$full") || exit $?
+        local object="$STORE_OBJECTS_DIR/$hash"
+        mv -f "$full" "$object" || exit 1
+        chmod -w "$object" || exit 1
+        ln -sf $(relpath "$STORE_OBJECTS_DIR/$hash" "${full%/*}") "$full" || exit 1
+        # Add the link
+        git add "$file"
         local old_hash=$(_get_hash_from_store "$full")
         if [[ "$old_hash" != "$hash" ]]; then
             local relfile=$(_get_relative_store_path_from_rootdir "$full")
@@ -211,10 +226,15 @@ _store_remove_store() {
 _fetch_remote_ref() {
     local ref=${1:?missing argument ref}
     _define_remote_store_name
+    # First check if the repository is correctly initialized and ref exists
+    git ls-remote --exit-code $REMOTE_STORE $REFS_STORE/$ref
+    local exit_code=$?
+    case "$exit_code" in
+        0) ;;
+        2) die "The reference doesn't exists on $REMOTE_STORE!\n" ;;
+        *) die "Can't get remote reference !\nIs the $REMOTE_STORE repository initialized correctly ?\n"
+    esac
     git fetch -q $REMOTE_STORE $REFS_STORE/$ref:$REFS_STORE/$ref 2>&1
-    if [[ $? -ne 0 ]]; then
-        die "Can't get remote reference !\nIs the $REMOTE_STORE repository initialized correctly ?\n"
-    fi
 }
 
 store_commit() {
@@ -252,28 +272,25 @@ _do_checkout() {
         echo "[_do_checkout] error: file path must be absolute !" >&2
         exit 1
     fi
-    local path="${full%/*}"
-    [[ ! -d "$path" ]] && mkdir -p "$path"
 
-    local local_hash=$(git hash-object "$full" 2>/dev/null)
-    git cat-file -e $hash
-    local hash_exist=$([[ $? -eq 0 ]] && echo 1 || echo 0)
-
-    # Perhaps the file exists locally
-    if [[ "$local_hash" == "$hash" ]]; then
-        [[ "$hash_exist" -ne 1 ]] && git hash-object -w "$full" >/dev/null
-    else
+    local object_file=$(readlink -f "$full")
+    [[ "$object_file" != "$STORE_OBJECTS_DIR"/* ]] && exit 0
+    local hash=${object_file/$STORE_OBJECTS_DIR\/}
+    if [[ ! -f "$object_file" ]]; then
+        # Check if the hash exists
+        git cat-file -e $hash
+        local hash_exist=$([[ $? -eq 0 ]] && echo 1 || echo 0)
         if [[ "$hash_exist" -eq 0 ]]; then
             # Try to download from remote
-            local relfile=$(_get_relative_store_path_from_rootdir "$file")
+            _define_remote_store_name
+            local relfile=$(_get_relative_store_path_from_rootdir "$full")
             printf "Downloading %s from %s...\n" "$(say_color cyan $relfile)" "$(say_color green $REMOTE_STORE)"
             _fetch_remote_ref "$hash"
         fi
+        git update-ref "$REFS_STORE/$hash" $hash
+        git show $hash -- > "$object_file" || exit 1
     fi
-    git update-ref "$REFS_STORE/$hash" $hash
-    if [[ "$local_hash" != "$hash" ]]; then
-        git show $hash -- > "$full" || exit 1
-    fi
+    chmod -w "$object_file"
 }
 
 store_checkout() {
@@ -635,10 +652,11 @@ if [[ $? -ne 0 ]]; then
     echo "fatal: Not a git repository (or any of the parent directories)" >&2
     exit 128
 fi
-STORE="$ROOT_DIR/.$self"
-STORE_INDEX_DIR=$(git rev-parse --git-dir) || exit $?
-[[ ! "$STORE_INDEX_DIR" =~ ^/ ]] && STORE_INDEX_DIR=$(_get_abspath_from_pwd "$STORE_INDEX_DIR")
-STORE_INDEX="$STORE_INDEX_DIR/${self}.idx"
+STORE="$ROOT_DIR/.$self.idx"
+STORE_DIR=$(_get_abspath_from_pwd "$ROOT_DIR/.${self}")
+STORE_INDEX="$STORE_DIR/index"
+declare -r STORE_OBJECTS_DIR="${STORE_DIR}/objects"
+[[ ! -d "$STORE_OBJECTS_DIR" ]] && mkdir -p "$STORE_OBJECTS_DIR"
 
 set -u # Blow on unbound variable
 
