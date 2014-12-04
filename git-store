@@ -73,23 +73,26 @@ _escape_ereg() {
     sed 's/[]\.|$(){}?+*^]/\\&/g' <<< "$@"
 }
 
+git_store() {
+    git --git-dir="$STORE_GIT_DIR" $@
+}
+
 _define_remote_store_name() {
-    [[ -n "${REMOTE_STORE:-}" ]] && return 0
-	local git_store_configuration_file="$ROOT_DIR/.git-store.conf"
-    if [[ -f "$git_store_configuration_file" ]]; then
-        local tracking_remote=$(git config --file "$git_store_configuration_file" remote.name)
-        local remote_store_url="$(git config --get remote.${tracking_remote}.url)"
-        if [[ -z "$remote_store_url" ]]; then
-            git remote add "$tracking_remote" $(git config --file "$git_store_configuration_file" remote.url)
-        fi
-    else
-        # By default try to use the same remote that is used for the current branch
-        local local_branch=$(git name-rev --name-only HEAD)
-        # TODO check if we are not on detaching branch
-        local tracking_remote=$(git config branch.${local_branch}.remote)
-        [[ -z "$tracking_remote" ]] && die "The current branch has no upstream defined !\n"
-    fi
-    REMOTE_STORE="$tracking_remote"
+    [[ -n "${REMOTE_STORE_URL:-}" ]] && return 0
+	#local git_store_configuration_file="$ROOT_DIR/.git-store.conf"
+    #if [[ -f "$git_store_configuration_file" ]]; then
+    #    local tracking_remote=$(git config --file "$git_store_configuration_file" remote.name)
+    #    local remote_store_url="$(git_store config --get remote.${tracking_remote}.url)"
+    #    if [[ -z "$remote_store_url" ]]; then
+    #        git_store remote add "$tracking_remote" $(git config --file "$git_store_configuration_file" remote.url)
+    #    fi
+    #else
+    # By default try to use the same remote that is used for the current branch
+    local local_branch=$(git name-rev --name-only HEAD)
+    # TODO check if we are not on detaching branch
+    REMOTE_STORE=$(git config branch.${local_branch}.remote)
+    [[ -z "$REMOTE_STORE" ]] && die "The current branch has no upstream defined !\n"
+    REMOTE_STORE_URL=$(git config remote.${REMOTE_STORE}.url)
 }
 
 _update_store_file() {
@@ -100,7 +103,7 @@ _update_store_file() {
         egrep -v "^#|[A-Fa-f0-9]{40}[|]${ereg}[|]" "$STORE" > "$STORE"~
     fi
     if [[ -n "$hash" ]]; then
-        local size=$(git cat-file -s $hash) || exit $?
+        local size=$(git_store cat-file -s $hash) || exit $?
         echo "$hash|$file|$size" >> "$STORE"~
     fi
     echo "$HEADER_STORE" > "$STORE"
@@ -169,7 +172,7 @@ store_add() {
             continue
         fi
         # Store the file
-        local hash=$(git hash-object -t blob -w "$full") || exit $?
+        local hash=$(git_store hash-object -t blob -w "$full") || exit $?
         local object="$STORE_OBJECTS_DIR/$hash"
         mv -f "$full" "$object" || exit 1
         chmod a-w "$object" || exit 1
@@ -196,7 +199,7 @@ store_remove() {
         local hash=""
         if [[ -f "$full" ]]; then
             # Store the file in case so we can restore it
-            hash=$(git hash-object -t blob -w "$full") || exit $?
+            hash=$(git_store hash-object -t blob -w "$full") || exit $?
             rm -f "$full"
         fi
         local relfile=$(_get_relative_store_path_from_rootdir "$full")
@@ -227,14 +230,14 @@ _fetch_remote_ref() {
     local ref=${1:?missing argument ref}
     _define_remote_store_name
     # First check if the repository is correctly initialized and ref exists
-    git ls-remote --exit-code $REMOTE_STORE $REFS_STORE/$ref
+    git_store ls-remote --exit-code $REMOTE_STORE_URL $REFS_STORE/$ref
     local exit_code=$?
     case "$exit_code" in
         0) ;;
         2) die "The reference doesn't exists on $REMOTE_STORE!\n" ;;
         *) die "Can't get remote reference !\nIs the $REMOTE_STORE repository initialized correctly ?\n"
     esac
-    git fetch -q $REMOTE_STORE $REFS_STORE/$ref:$REFS_STORE/$ref 2>&1
+    git_store fetch -q $REMOTE_STORE_URL $REFS_STORE/$ref:$REFS_STORE/$ref 2>&1
 }
 
 store_commit() {
@@ -250,18 +253,18 @@ store_commit() {
 
     # Add new local references
     while IFS='|' read hash file; do
-        git cat-file -e $hash
+        git_store cat-file -e $hash
         [[ $? -ne 0 ]] && continue
-        git update-ref "$REFS_STORE/$hash" $hash || exit $?
+        git_store update-ref "$REFS_STORE/$hash" $hash || exit $?
     done < <(egrep -v '^#' "$STORE")
 
     # remove old local references
     while read hash ref; do
         # check if the ref exists in the store
         if [[ $(egrep -c "^$hash[|]" "$STORE") -eq 0 ]]; then
-            git update-ref -d "$ref" || exit $?
+            git_store update-ref -d "$ref" || exit $?
         fi
-    done < <(git for-each-ref --format='%(objectname) %(refname)' | egrep "\s$REFS_STORE/[A-Fa-f0-9]{40}")
+    done < <(git_store for-each-ref --format='%(objectname) %(refname)' | egrep "\s$REFS_STORE/[A-Fa-f0-9]{40}")
     _update_gitignore_file
 }
 
@@ -277,7 +280,7 @@ _do_checkout() {
     local hash=${object_file/$STORE_OBJECTS_DIR\/}
     if [[ ! -f "$object_file" ]]; then
         # Check if the hash exists
-        git cat-file -e $hash
+        git_store cat-file -e $hash
         local hash_exist=$([[ $? -eq 0 ]] && echo 1 || echo 0)
         if [[ "$hash_exist" -eq 0 ]]; then
             # Try to download from remote
@@ -286,8 +289,8 @@ _do_checkout() {
             printf "Downloading %s from %s...\n" "$(say_color cyan $relfile)" "$(say_color green $REMOTE_STORE)"
             _fetch_remote_ref "$hash"
         fi
-        git update-ref "$REFS_STORE/$hash" $hash
-        git show $hash -- > "$object_file" || exit 1
+        git_store update-ref "$REFS_STORE/$hash" $hash
+        git_store show $hash -- > "$object_file" || exit 1
     fi
     chmod a-w "$object_file"
 }
@@ -298,7 +301,7 @@ store_checkout() {
         [[ "$arg" == ':/' ]] && arg="$ROOT_DIR"
         if [[ -d "$arg" ]]; then
             while read -r link_hash file; do
-                local object_file=$(git-cat-file -p $link_hash)
+                local object_file=$(git cat-file -p $link_hash)
                 if [[ "$ROOT_DIR/$object_file" == "$STORE_OBJECTS_DIR"/* ]]; then
                     files_to_get+=( "$file" )
                 fi
@@ -331,7 +334,7 @@ store_list() {
     local cmd
     if [[ "$OPT_REMOTE" -eq 1 ]]; then
         _fetch_remote_ref 'all_files'
-        cmd=("git" "show" "$REFS_STORE/all_files")
+        cmd=("git_store" "show" "$REFS_STORE/all_files")
     else
         [[ ! -f "$STORE" ]] && touch "$STORE"
         cmd=("egrep" "-v" '^#' "$STORE")
@@ -419,7 +422,7 @@ store_status() {
         msgs=()
         while IFS='|' read hash file size; do
             local file_path=$(_get_abspath_from_rootdir "$file")
-            local local_hash=$(git hash-object "$file_path" 2>/dev/null)
+            local local_hash=$(git_store hash-object "$file_path" 2>/dev/null)
             local index_hash=$(_get_hash_from_store_index "$file")
             local index_action=$(_get_action_from_store_index "$file")
             # Delete case
@@ -452,75 +455,86 @@ store_status() {
     local file
     while IFS= read -r -u3 file; do
         printf "\t%s\n" "$(say_color cyan "$(_get_relative_store_path_from_pwd "$file")")"
-    done 3< <(git status --untracked-files=normal --porcelain | sed -nr 's|^\?\?\s*(.+)$|\1|p')
+    done 3< <(git_store status --untracked-files=normal --porcelain | sed -nr 's|^\?\?\s*(.+)$|\1|p')
 }
 
 store_push() {
     local tmp1=$(mktemp)
+
     _define_remote_store_name
-    local remote_store_url=$(git config --get remote.${REMOTE_STORE}.url)
-    if [[ "$remote_store_url" =~ git://* ]]; then
+    if [[ "$REMOTE_STORE_URL" =~ git://* ]]; then
         echo "Error: you must use a read/write URL to push on remote repository" >&2
-        echo "Actually the remote URL is: $remote_store_url" >&2
+        echo "Actually the remote URL is: $REMOTE_STORE_URL" >&2
         echo "Change it with command like:" >&2
         echo "git config remote.${REMOTE_STORE}.url USERNAME@HOST:/path/to/repository.git" >&2
         exit 1
     fi
     _fetch_remote_ref 'all_files'
-    git show $REFS_STORE/all_files -- | egrep -v '^#' > "$tmp1"
+
+    git_store show $REFS_STORE/all_files -- | egrep -v '^#' > "$tmp1"
     cut -d'|' -f1-2 "$tmp1" | sort -u > "$tmp1".mini
 
     local tmp2=$(mktemp)
-    cat "$STORE" | egrep -v '^#' > "$tmp2"
-    cut -d'|' -f1-2 "$tmp2" | sort -u > "$tmp2".mini
+    while read -r link_hash file; do
+         local object_file=$(git cat-file -p $link_hash)
+         if [[ "$ROOT_DIR/$object_file" == "$STORE_OBJECTS_DIR"/* ]]; then
+             local hash="${object_file##*/}" # get hash from object name
+             echo "${hash}|${file}" >> "$tmp2"
+         fi
+    done < <(git ls-files -s :/  | awk '/^120000/ { $1=$3=""; printf "%s\n",substr($0,2)}' )
+    sort -u "$tmp2"> "$tmp2".mini
 
     local count=0
 
     # push new hashs
     while IFS='|' read hash file; do
+        echo "$hash -> $file"
         # check if the blob exists locally
-        git cat-file -e $hash
+        git_store cat-file -e $hash
         if [[ $? -eq 0 ]]; then
             printf "Pushing %s to %s...\n" "$(say_color cyan $file)" "$(say_color green $REMOTE_STORE)"
-            git push -q "$REMOTE_STORE" $hash:$REFS_STORE/$hash || exit $?
-            local line=$(grep "$hash|$file|" "$STORE")
+            git_store push -q "$REMOTE_STORE_URL" $hash:$REFS_STORE/$hash || exit $?
+            local size=$(git_store cat-file -s $hash) || exit $?
             # Add timestamp
-            echo "$line|$(date '+%s')" >> "$tmp1"
+            echo "$hash|$file|$size|$(date '+%s')" >> "$tmp1"
             (( count++ ))
         fi
     done < <(comm -1 -3 "$tmp1".mini "$tmp2".mini | sort -t'|' -k2)
     rm -f "$tmp1".mini "$tmp2".mini
 
     sort -u -t'|' -k2 "$tmp1" > "$tmp2"
-    local hash=$(git hash-object -t blob -w "$tmp2")
+
+    local hash=$(git_store hash-object -t blob -w "$tmp2")
     rm -f "$tmp1" "$tmp2"
 
     if [[ $count -gt 0 ]]; then
         # Push the new all_files file
-        git push --force -q "$REMOTE_STORE" $hash:$REFS_STORE/all_files 2>/dev/null || exit $?
-        git update-ref "$REFS_STORE/all_files" $hash || exit $?
+        git_store push --force -q "$REMOTE_STORE_URL" $hash:$REFS_STORE/all_files 2>/dev/null || exit $?
+        git_store update-ref "$REFS_STORE/all_files" $hash || exit $?
     fi
 }
 
 store_cleanup() {
     local tmp1=$(mktemp)
-    git for-each-ref --format='%(objectname) %(objecttype) %(refname)' | \
+
+    git_store for-each-ref --format='%(objectname) %(objecttype) %(refname)' | \
         sed -nr "s|^([A-Fa-f0-9]{40})\s+blob\s+$REFS_STORE/[A-Fa-f0-9]{40}$|\1|p" | sort -u >"$tmp1"
+
     local tmp2=$(mktemp)
     [[ -f "${STORE}" ]] && sed -nr "s|^([A-Fa-f0-9]{40})[|].*|\1|p" "${STORE}" | sort -u >"$tmp2"
 
     local hash
     while read hash; do
-        git update-ref -d "$REFS_STORE/$hash"
+        git_store update-ref -d "$REFS_STORE/$hash"
     done < <(comm -2 -3 "$tmp1" "$tmp2")
 
     [[ -f "${STORE}" ]] && sed -nr "s|^([A-Fa-f0-9]{40}[|][^|]+[|]).*|\1|p" "${STORE}" >"$tmp1"
-    git show $REFS_STORE/all_files 2>/dev/null | sed -nr "s|^([A-Fa-f0-9]{40}[|][^|]+[|]).*|\1|p" >"$tmp2"
+    git_store show $REFS_STORE/all_files 2>/dev/null | sed -nr "s|^([A-Fa-f0-9]{40}[|][^|]+[|]).*|\1|p" >"$tmp2"
     local file
     while read file; do
         local full="$(_get_abspath_from_rootdir "$file")"
         [[ ! -f "$full" ]] && continue
-        local local_hash=$(git hash-object "$full")
+        local local_hash=$(git_store hash-object "$full")
         local ereg="$(_escape_ereg "$file")"
         [[ $(egrep -c "^$local_hash[|]$ereg[|]" "$tmp1") -ne 0 ]] && continue
         [[ $(egrep -c "^$local_hash[|]$ereg[|]" "$tmp2") -ne 0 ]] && rm -f "$full"
@@ -637,10 +651,10 @@ if [[ $? -ne 0 ]]; then
     exit 128
 fi
 STORE="$ROOT_DIR/.$self.idx"
-STORE_DIR=$(_get_abspath_from_pwd "$ROOT_DIR/.${self}")
-STORE_INDEX="$STORE_DIR/index"
-declare -r STORE_OBJECTS_DIR="${STORE_DIR}/objects"
-[[ ! -d "$STORE_OBJECTS_DIR" ]] && mkdir -p "$STORE_OBJECTS_DIR"
+STORE_GIT_DIR=$(_get_abspath_from_pwd "$ROOT_DIR/.${self}")
+STORE_INDEX="$STORE_GIT_DIR/store.idx"
+declare -r STORE_OBJECTS_DIR="${STORE_GIT_DIR}/objects"
+[[ ! -d "$STORE_OBJECTS_DIR" ]] && git_store init --quiet
 
 set -u # Blow on unbound variable
 
