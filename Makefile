@@ -4,6 +4,8 @@ SHELL   = /bin/bash
 NAME    = git-store
 VERSION = $(shell awk '/Version:/{print $$2;exit}' $(NAME).spec)
 
+BINS    = git-store
+
 DIST_ARCHIVE = $(distdir).tar.gz
 GZIP_ENV = --best
 
@@ -20,7 +22,7 @@ $(DIST_ARCHIVE): dist
 distdir:
 	$(am__remove_distdir)
 	test -d "$(distdir)" || mkdir "$(distdir)"
-	cp Makefile git-store utils.lib "$(distdir)"
+	cp Makefile $(BINS) "$(distdir)"
 
 dist: distdir
 	tardir=$(distdir) && $(am__tar) | GZIP=$(GZIP_ENV) gzip -c >$(DIST_ARCHIVE)
@@ -35,7 +37,10 @@ clean:
 # Création du tar.gz des sources
 sources: clean dist
 
-# Cible 'srpm' utilisée pour debug
+install: $(BINS)
+	@install -m 0644 $(BINS) "$${PREFIX:-/usr}"/bin
+
+# Cible 'srpm'
 srpm: sources
 	rpmbuild --define "_topdir /tmp" \
 		--define "_sourcedir ." \
