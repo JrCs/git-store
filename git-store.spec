@@ -1,6 +1,6 @@
 Name:			git-store
-Version:		0.1
-Release:		2%{?dist}
+Version:		0.2
+Release:		1%{?dist}
 Summary:		Git store
 
 License:		GPLv2

@@ -38,7 +38,7 @@ clean:
 sources: clean dist
 
 install: $(BINS)
-	@install -m 0644 $(BINS) "$${PREFIX:-/usr}"/bin
+	@install -m 0755 $(BINS) "$${PREFIX:-/usr}"/bin
 
 # Cible 'srpm'
 srpm: sources

@@ -9,7 +9,7 @@
 # http://www.apache.org/licenses/LICENSE-2.0.html
 #
 
-declare -r VERSION="1.0"
+declare -r VERSION="0.2"
 
 declare -r HEADER_STORE=$(cat <<EOF
 #
@@ -558,12 +558,14 @@ store_list() {
         tmp1=$(mktemp)
         while read -r link_hash file; do
             local object_file=$(git cat-file -p $link_hash)
-            if [[ "$ROOT_DIR/$object_file" == "$STORE_OBJECTS_DIR"/* ]]; then
+            if [[ "$object_file" == *"$STORE_OBJECT_DIR_FROM_ROOT"/* ]]; then
                 local hash="${object_file##*/}" # get hash from object name
-                local size=$(git_store cat-file -s $hash) || exit $?
-                local timestamp=""
-                [[ -f "$ROOT_DIR/$object_file" ]] && timestamp=$(stat --format='%Y' "$ROOT_DIR/$object_file")
-                echo "$hash|$file|$size|$timestamp" >> "$tmp1"
+                local size=$(git_store cat-file -s $hash 2>/dev/null)
+                if [[ -n "$size" ]]; then
+                    local timestamp=""
+                    [[ -f "$STORE_OBJECTS_DIR/$hash" ]] && timestamp=$(stat --format='%Y' "$STORE_OBJECTS_DIR/$hash")
+                    echo "$hash|$file|$size|$timestamp" >> "$tmp1"
+                fi
             fi
         done < <(git ls-files -s ":/"  | awk '/^120000/ { $1=$3=""; printf "%s\n",substr($0,2)}' )
         cmd=("cat" "$tmp1")
@@ -708,11 +710,11 @@ store_push() {
 
     local tmp2=$(mktemp)
     while read -r link_hash file; do
-         local object_file=$(git cat-file -p $link_hash)
-         if [[ "$ROOT_DIR/$object_file" == "$STORE_OBJECTS_DIR"/* ]]; then
-             local hash="${object_file##*/}" # get hash from object name
-             echo "${hash}|${file}" >> "$tmp2"
-         fi
+        local object_file=$(git cat-file -p $link_hash)
+        if [[ "$ROOT_DIR/$object_file" ==  *"$STORE_OBJECT_DIR_FROM_ROOT"/* ]]; then
+            local hash="${object_file##*/}" # get hash from object name
+            echo "${hash}|${file}" >> "$tmp2"
+        fi
     done < <(cd "$ROOT_DIR" && git ls-files -s :/  | awk '/^120000/ { $1=$3=""; printf "%s\n",substr($0,2)}' )
     sort -u "$tmp2"> "$tmp2".mini
 
