@@ -9,7 +9,7 @@
 # http://www.apache.org/licenses/LICENSE-2.0.html
 #
 
-declare -r VERSION="0.2"
+declare -r VERSION="0.3"
 
 declare -r HEADER_STORE=$(cat <<EOF
 #
@@ -711,7 +711,7 @@ store_push() {
     local tmp2=$(mktemp)
     while read -r link_hash file; do
         local object_file=$(git cat-file -p $link_hash)
-        if [[ "$ROOT_DIR/$object_file" ==  *"$STORE_OBJECT_DIR_FROM_ROOT"/* ]]; then
+        if [[ "$object_file" ==  *"$STORE_OBJECT_DIR_FROM_ROOT"/* ]]; then
             local hash="${object_file##*/}" # get hash from object name
             echo "${hash}|${file}" >> "$tmp2"
         fi
@@ -817,7 +817,7 @@ store_precommit() {
             bad_files+=("$relative_file")
             files_size+=("$human_size")
         fi
-    done < <(git diff --cached --numstat $empty_tree | grep -e '^-' | cut -f3)
+    done < <(git diff --cached --numstat | grep -e '^-' | cut -f3)
 
     if [[ "${#bad_files[@]}" -gt 0 ]]; then
         error "trying to commit 'big' binary file(s):\n"
@@ -944,14 +944,23 @@ if [[ $? -ne 0 ]]; then
 fi
 
 git_dir="$(readlink -f $(git rev-parse --git-dir))"
-
+git_dir_basename=${git_dir##*/}
 STORE="$ROOT_DIR/.$self.idx"
-STORE_GIT_DIR="${git_dir}/store"
-[[ ! -d "$STORE_GIT_DIR" ]] && git_store init --quiet
+STORE_GIT_DIR="${STORE_GIT_DIR:-${ROOT_DIR}/.git-store}"
+if [[ ! -d "$STORE_GIT_DIR" ]]; then
+    git_store init --quiet
+    tmp=$(mktemp)
+    mkdir -p "$git_dir/info"
+    if [[ -f "$git_dir/info/exclude" ]]; then
+        grep -v '^.git-store' "$git_dir/info/exclude" > "$tmp"
+    fi
+    echo '.git-store' >> "$tmp"
+    mv "$tmp" "$git_dir/info/exclude"
+fi
 STORE_INDEX="$STORE_GIT_DIR/store.idx"
 declare -r STORE_OBJECTS_DIR="${STORE_GIT_DIR}/data"
 [[ ! -d "$STORE_OBJECTS_DIR" ]] && mkdir -p "$STORE_OBJECTS_DIR"
-declare -r STORE_OBJECT_DIR_FROM_ROOT=$(_get_relative_store_path_from_rootdir "$STORE_OBJECTS_DIR")
+declare -r STORE_OBJECT_DIR_FROM_ROOT=".git-store/data"
 
 precommit_hook_script="$git_dir/hooks/pre-commit"
 if [[ ! -x "$precommit_hook_script" ]]; then

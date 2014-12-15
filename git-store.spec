@@ -1,5 +1,5 @@
 Name:			git-store
-Version:		0.2
+Version:		0.3
 Release:		1%{?dist}
 Summary:		Git store
 
