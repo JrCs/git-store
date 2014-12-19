@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Created by Yves Blusseau for Bering uClibc
+# Created by Yves Blusseau
 #
 # This script is use to store/retrieve files store on a remote git repository
 #
@@ -9,7 +9,7 @@
 # http://www.apache.org/licenses/LICENSE-2.0.html
 #
 
-declare -r VERSION="0.3"
+declare -r VERSION="0.4"
 
 declare -r HEADER_STORE=$(cat <<EOF
 #
@@ -307,7 +307,7 @@ git_store() {
 
 _define_remote_store_name() {
     [[ -n "${REMOTE_STORE_URL:-}" ]] && return 0
-	#local git_store_configuration_file="$ROOT_DIR/.git-store.conf"
+    #local git_store_configuration_file="$ROOT_DIR/.git-store.conf"
     #if [[ -f "$git_store_configuration_file" ]]; then
     #    local tracking_remote=$(git config --file "$git_store_configuration_file" remote.name)
     #    local remote_store_url="$(git_store config --get remote.${tracking_remote}.url)"
@@ -392,6 +392,8 @@ store_add() {
         mv -f "$full" "$object" || exit 1
         chmod a-w "$object" || exit 1
         ln -sf $(relpath "$STORE_OBJECTS_DIR/$hash" "${full%/*}") "$full" || exit 1
+        # Add to the index file
+        _store_store "$hash" "$full"
         # Add the link
         git add "$file"
     done
@@ -404,7 +406,7 @@ store_remove() {
         if [[ -f "$full" ]]; then
             # Store the file in case so we can restore it
             hash=$(git_store hash-object -t blob -w "$full") || exit $?
-            rm -f "$full"
+            git rm -f "$full"
         fi
         local relfile=$(_get_relative_store_path_from_rootdir "$full")
         if [[ -f "$STORE_INDEX" ]]; then
@@ -771,9 +773,9 @@ store_cleanup() {
         git_store update-ref -d "$REFS_STORE/$hash"
     done < <(comm -2 -3 "$tmp1" "$tmp2".sort)
 
-	# Prune all unreachable objects from the object database
-	git_store prune --expire now
-	
+    # Prune all unreachable objects from the object database
+    git_store prune --expire now
+
     rm -f "$tmp1" "$tmp2" "$tmp2".sort
 }
 
@@ -791,7 +793,43 @@ store_fix() {
                 ln -sf "$object_file_relative_to_file" "$file" || exit $?
             fi
         fi
-    done < <(git ls-files -c -o ":/")
+    done < <(git ls-files -c -o --exclude="${STORE_GIT_DIR_NAME}"/ ":/")
+}
+
+store_direct() {
+    # First get all the files
+    store_checkout ":/" || exit $?
+    while read -r file; do
+        # The file must exists and must be a link
+        if [[ -L "$file" && -f "$file" ]]; then
+            local object_file=$(readlink "$file")
+            if [[ "$object_file" == *"$STORE_OBJECT_DIR_FROM_ROOT"/* ]]; then
+                local hash="${object_file##*/}" # get hash from object name
+                local object="$STORE_OBJECTS_DIR/$hash"
+                local full=$(_get_abspath_from_pwd "$file")
+                _store_store "$hash" "$full"
+                rm -f "$full" || exit $?
+                cp "$object" "$full" || exit $?
+            fi
+        fi
+    done < <(git ls-files -c -o --exclude="${STORE_GIT_DIR_NAME}"/ ":/")
+}
+
+store_indirect() {
+    if [[ -f "$STORE" ]]; then
+        while IFS='|' read hash file size; do
+            local file_path=$(_get_abspath_from_rootdir "$file")
+            local local_hash=$(git_store hash-object "$file_path" 2>/dev/null)
+            local index_hash=$(_get_hash_from_store "$file")
+            #local index_action=$(_get_action_from_store_index "$file")
+            if [[ "$local_hash" == "$index_hash" ]]; then
+                # Restore the link
+                local dirname_file="${file_path%/*}"
+                local object_file_relative_to_file=$(relpath "$STORE_OBJECTS_DIR/$local_hash" "$dirname_file")
+                ln -sf "$object_file_relative_to_file" "$file_path" || exit $?
+            fi
+        done < <(egrep -v '^#' "$STORE")
+    fi
 }
 
 store_precommit() {
@@ -875,6 +913,10 @@ usage () {
     print_option_help "-s, --sort-by-size"       "sort file(s) by size"
     print_option_help "-t, --sort-by-time"       "sort file(s) by date"
     echo
+    printf   "* Direct/Indirect modes:\n"
+    print_option_help "$self direct"   "Switches a repository to use direct mode, where rather than symlinks to files, the files are directly present in the repository."
+    print_option_help "$self indirect" "Switches a repository back from direct mode to the default, indirect mode."
+    echo
     printf   "* Maintenance:\n"
     print_option_help "$self fix" "fix bad link(s)"
     print_option_help "$self cleanup" "remove reference to store file(s)"
@@ -945,8 +987,7 @@ fi
 
 git_dir="$(readlink -f $(git rev-parse --git-dir))"
 git_dir_basename=${git_dir##*/}
-STORE="$ROOT_DIR/.$self.idx"
-STORE_GIT_DIR="${STORE_GIT_DIR:-${ROOT_DIR}/.git-store}"
+STORE_GIT_DIR="${STORE_GIT_DIR:-${ROOT_DIR}/.$self}"
 if [[ ! -d "$STORE_GIT_DIR" ]]; then
     git_store init --quiet
     tmp=$(mktemp)
@@ -957,10 +998,12 @@ if [[ ! -d "$STORE_GIT_DIR" ]]; then
     echo '.git-store' >> "$tmp"
     mv "$tmp" "$git_dir/info/exclude"
 fi
+STORE_GIT_DIR_NAME="${STORE_GIT_DIR##*/}"
+STORE="$ROOT_DIR/.$self.idx"
 STORE_INDEX="$STORE_GIT_DIR/store.idx"
 declare -r STORE_OBJECTS_DIR="${STORE_GIT_DIR}/data"
 [[ ! -d "$STORE_OBJECTS_DIR" ]] && mkdir -p "$STORE_OBJECTS_DIR"
-declare -r STORE_OBJECT_DIR_FROM_ROOT=".git-store/data"
+declare -r STORE_OBJECT_DIR_FROM_ROOT="${STORE_GIT_DIR_NAME}/data"
 
 precommit_hook_script="$git_dir/hooks/pre-commit"
 if [[ ! -x "$precommit_hook_script" ]]; then
@@ -984,6 +1027,8 @@ case "$ACTION" in
     status|st) store_status;;
     push) store_push;;
     fix) store_fix;;
+    direct) store_direct;;
+    indirect) store_indirect;;
     pre-commit) store_precommit;;
     cleanup) store_cleanup;;
     *) exit_code=0
