@@ -9,7 +9,7 @@
 # http://www.apache.org/licenses/LICENSE-2.0.html
 #
 
-declare -r VERSION="0.4"
+declare -r VERSION="0.5"
 
 declare -r HEADER_STORE=$(cat <<EOF
 #
