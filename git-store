@@ -4,12 +4,12 @@
 #
 # This script is use to store/retrieve files store on a remote git repository
 #
-# Copyright (C) 2014 Yves Blusseau
+# Copyright (C) 2014-2015 Yves Blusseau
 # Licensed under the Apace License 2.0
 # http://www.apache.org/licenses/LICENSE-2.0.html
 #
 
-declare -r VERSION="0.5"
+declare -r VERSION="0.6"
 
 declare -r HEADER_STORE=$(cat <<EOF
 #
@@ -326,25 +326,25 @@ _define_remote_store_name() {
 _update_store_file() {
     local file="${1:?missing argument}"
     local hash=${2:-}
-    if [[ -f "$STORE" ]]; then
+    if [[ -f "$STORE_LOCAL_INDEX" ]]; then
         local ereg="$(_escape_ereg "$file")"
-        egrep -v "^#|[A-Fa-f0-9]{40}[|]${ereg}[|]" "$STORE" > "$STORE"~
+        egrep -v "^#|[A-Fa-f0-9]{40}[|]${ereg}[|]" "$STORE_LOCAL_INDEX" > "$STORE_LOCAL_INDEX"~
     fi
     if [[ -n "$hash" ]]; then
         local size=$(git_store cat-file -s $hash) || exit $?
-        echo "$hash|$file|$size" >> "$STORE"~
+        echo "$hash|$file|$size" >> "$STORE_LOCAL_INDEX"~
     fi
-    echo "$HEADER_STORE" > "$STORE"
-    cat "$STORE"~ | sort -u -t'|' -k2 >> "$STORE"
-    rm -f "${STORE}"~
+    echo "$HEADER_STORE" > "$STORE_LOCAL_INDEX"
+    cat "$STORE_LOCAL_INDEX"~ | sort -u -t'|' -k2 >> "$STORE_LOCAL_INDEX"
+    rm -f "${STORE_LOCAL_INDEX}"~
 }
 
 _get_hash_from_store() {
     search_file="${1:?missing argument}"
-    if [[ -f "${STORE}" ]]; then
+    if [[ -f "${STORE_LOCAL_INDEX}" ]]; then
         local relfile=$(_get_relative_store_path_from_rootdir "$search_file")
         local ereg="$(_escape_ereg "$relfile")"
-        sed -nr "s|([A-Fa-f0-9]{40})[|]$ereg[|].*|\1|p" "${STORE}"
+        sed -nr "s|([A-Fa-f0-9]{40})[|]$ereg[|].*|\1|p" "${STORE_LOCAL_INDEX}"
     fi
 }
 
@@ -480,12 +480,12 @@ store_commit() {
         git_store cat-file -e $hash
         [[ $? -ne 0 ]] && continue
         git_store update-ref "$REFS_STORE/$hash" $hash || exit $?
-    done < <(egrep -v '^#' "$STORE")
+    done < <(egrep -v '^#' "$STORE_LOCAL_INDEX")
 
     # remove old local references
     while read hash ref; do
         # check if the ref exists in the store
-        if [[ $(egrep -c "^$hash[|]" "$STORE") -eq 0 ]]; then
+        if [[ $(egrep -c "^$hash[|]" "$STORE_LOCAL_INDEX") -eq 0 ]]; then
             git_store update-ref -d "$ref" || exit $?
         fi
     done < <(git_store for-each-ref --format='%(objectname) %(refname)' | egrep "\s$REFS_STORE/[A-Fa-f0-9]{40}")
@@ -653,7 +653,7 @@ store_status() {
         fi
     fi
 
-    if [[ -f "$STORE" ]]; then
+    if [[ -f "$STORE_LOCAL_INDEX" ]]; then
         msgs=()
         while IFS='|' read hash file size; do
             local file_path=$(_get_abspath_from_rootdir "$file")
@@ -670,7 +670,7 @@ store_status() {
                 msgs+=("$(_status_modified "$file")")
                 continue
             fi
-        done < <(egrep -v '^#' "$STORE")
+        done < <(egrep -v '^#' "$STORE_LOCAL_INDEX")
         if [[ "${#msgs[*]}" -gt 0 ]]; then
 
             echo 'Changes not staged for commit:'
@@ -816,7 +816,7 @@ store_direct() {
 }
 
 store_indirect() {
-    if [[ -f "$STORE" ]]; then
+    if [[ -f "$STORE_LOCAL_INDEX" ]]; then
         while IFS='|' read hash file size; do
             local file_path=$(_get_abspath_from_rootdir "$file")
             local local_hash=$(git_store hash-object "$file_path" 2>/dev/null)
@@ -828,7 +828,7 @@ store_indirect() {
                 local object_file_relative_to_file=$(relpath "$STORE_OBJECTS_DIR/$local_hash" "$dirname_file")
                 ln -sf "$object_file_relative_to_file" "$file_path" || exit $?
             fi
-        done < <(egrep -v '^#' "$STORE")
+        done < <(egrep -v '^#' "$STORE_LOCAL_INDEX")
     fi
 }
 
@@ -999,7 +999,7 @@ if [[ ! -d "$STORE_GIT_DIR" ]]; then
     mv "$tmp" "$git_dir/info/exclude"
 fi
 STORE_GIT_DIR_NAME="${STORE_GIT_DIR##*/}"
-STORE="$ROOT_DIR/.$self.idx"
+STORE_LOCAL_INDEX="${STORE_GIT_DIR}/.$self.local.idx"
 STORE_INDEX="$STORE_GIT_DIR/store.idx"
 declare -r STORE_OBJECTS_DIR="${STORE_GIT_DIR}/data"
 [[ ! -d "$STORE_OBJECTS_DIR" ]] && mkdir -p "$STORE_OBJECTS_DIR"
