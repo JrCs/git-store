@@ -1,10 +1,11 @@
 # $Id$
 # Makefile pour construire le RPM de git-store
-SHELL   = /bin/bash
-NAME    = git-store
-VERSION = $(shell awk '/Version:/{print $$2;exit}' $(NAME).spec)
+SHELL   := /bin/bash
+NAME    := git-store
+VERSION := $(shell ./$(NAME) --version | sed -nE 's/^.*\s+//p')
 
 BINS    = git-store
+SPEC    = git-store.spec
 
 DIST_ARCHIVE = $(distdir).tar.gz
 GZIP_ENV = --best
@@ -18,6 +19,13 @@ am__remove_distdir = \
          && rm -fr "$(distdir)"; }; }
 
 $(DIST_ARCHIVE): dist
+
+.PHONY: spec clean distclean dist distdir sources install srpm
+
+%: %.in
+	sed 's/@VERSION@/$(VERSION)/g' $< > $@
+
+spec: $(SPEC)
 
 distdir:
 	$(am__remove_distdir)
@@ -33,9 +41,13 @@ clean:
 	@$(am__remove_distdir)
 	@rm -f $(DIST_ARCHIVE) /tmp/SRPMS/$(NAME)-* *~
 
+distclean: clean
+	@rm -f $(SPEC)
+
 # Cible 'sources' utilisée par Koji dans le cadre de la construction du RPM source
 # Création du tar.gz des sources
-sources: clean dist
+sources: clean $(SPEC) dist
+	if groups | grep -q -E '\bmockbuild\b'; then cp $(SPEC) bootstrap.spec; fi
 
 install: $(BINS)
 	@install -m 0755 $(BINS) "$${PREFIX:-/usr}"/bin
