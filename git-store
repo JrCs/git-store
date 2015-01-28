@@ -9,7 +9,7 @@
 # http://www.apache.org/licenses/LICENSE-2.0.html
 #
 
-declare -r VERSION="0.6"
+declare -r VERSION="0.7"
 
 declare -r HEADER_STORE=$(cat <<EOF
 #
@@ -307,20 +307,12 @@ git_store() {
 
 _define_remote_store_name() {
     [[ -n "${REMOTE_STORE_URL:-}" ]] && return 0
-    #local git_store_configuration_file="$ROOT_DIR/.git-store.conf"
-    #if [[ -f "$git_store_configuration_file" ]]; then
-    #    local tracking_remote=$(git config --file "$git_store_configuration_file" remote.name)
-    #    local remote_store_url="$(git_store config --get remote.${tracking_remote}.url)"
-    #    if [[ -z "$remote_store_url" ]]; then
-    #        git_store remote add "$tracking_remote" $(git config --file "$git_store_configuration_file" remote.url)
-    #    fi
-    #else
     # By default try to use the same remote that is used for the current branch
-    local local_branch=$(git name-rev --name-only HEAD)
-    # TODO check if we are not on detaching branch
-    REMOTE_STORE=$(git config branch.${local_branch}.remote)
+    REMOTE_STORE_URL=$(git ls-remote --get-url)
+    [[ -z "$REMOTE_STORE_URL" ]] && die "The current branch has no upstream defined !\n"
+    # Try to get the remote name
+    REMOTE_STORE=$(git remote -v | awk -vURL=$REMOTE_STORE_URL '{ if ($2 == URL && $3 == "(fetch)" ) { print $1 }}' | head -n 1)
     [[ -z "$REMOTE_STORE" ]] && die "The current branch has no upstream defined !\n"
-    REMOTE_STORE_URL=$(git config remote.${REMOTE_STORE}.url)
 }
 
 _update_store_file() {
