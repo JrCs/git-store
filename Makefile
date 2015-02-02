@@ -3,6 +3,7 @@
 SHELL   := /bin/bash
 NAME    := git-store
 VERSION := $(shell ./$(NAME) --version | sed -nE 's/^.*\s+//p')
+TEMPDIR := $(shell mktemp -d -u)
 
 BINS    = git-store
 SPEC    = git-store.spec
@@ -39,7 +40,7 @@ dist: distdir
 # Nettoyage 
 clean:
 	@$(am__remove_distdir)
-	@rm -f $(DIST_ARCHIVE) /tmp/SRPMS/$(NAME)-* *~
+	@rm -f $(DIST_ARCHIVE) $(NAME)-*.src.rpm *~
 
 distclean: clean
 	@rm -f $(SPEC)
@@ -54,7 +55,9 @@ install: $(BINS)
 
 # Cible 'srpm'
 srpm: sources
-	rpmbuild --define "_topdir /tmp" \
-		--define "_sourcedir ." \
-		--define "_specdir ." \
+	rpmbuild --define "_topdir $(TEMPDIR)" \
+		--define "_sourcedir ."    \
+		--define "_specdir ."      \
+		--define "_srcrpmdir ."    \
 		--nodeps -bs $(NAME).spec
+	@rm -rf "$(TEMPDIR)"
