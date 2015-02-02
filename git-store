@@ -839,7 +839,7 @@ store_precommit() {
             max_size=$(human_to_numeric "$attr_size")
             [[ $? -ne 0 ]] && die "Invalid size '$attr_size' in .gitattribute file !\n"
         fi
-        local size=$(stat --printf="%s" "$ROOT_DIR/$file")
+        local size=$(git cat-file -s $(git ls-files --stage "$file" | awk '{print $2}'))
         if [[ "$size" -ge $max_size ]]; then
             local human_size=$(numeric_to_human "$size")
             # GIT_PREFIX is set by git when executing hook
